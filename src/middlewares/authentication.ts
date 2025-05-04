@@ -1,101 +1,46 @@
-import jwt from "jsonwebtoken"
-import { Request , Response , NextFunction} from "express"
-import Seller from "../models/Seller"
-export interface ExtendRequest extends Request {
-  seller? : any
-}
-interface TokenProps {
-  id: string
-  roles: number[]
-  time:string
-}
-export const genToken= ({id,roles,time}:TokenProps)=>{
-  const accessToken:string = jwt.sign({id,roles},process?.env?.ACCESS_TOKEN_SECRET!,{
-    expiresIn:time
-  })
-  return accessToken
-}
-export const genRefreshToken= ({id,roles,time}:TokenProps)=>{
-  const accessToken:string = jwt.sign({id,roles},process?.env?.REFRESH_TOKEN_SECRET!,{
-    expiresIn:time
-  })
-  return accessToken
-}
+import jwt from "jsonwebtoken";
+import { Response, NextFunction } from "express";
+import { CatchAsyncError } from "../utils/catchAsync";
+import ApiError from "../utils/apiError";
+import { ExtendRequest, TokenProps } from "../types/custom";
+import { config } from "../config/environment";
 
-type requiredRoles = number[]
-export const requireAuth = 
-async (req:Request,res:Response,next:NextFunction) =>{
-try {
-  const accessToken = req.cookies.accessToken
-  if(!accessToken) 
-    res.status(403).json({error:"please login first"})
-  const decodedToken = await jwt.verify(accessToken,process?.env?.ACCESS_TOKEN_SECRET!)
-  console.log(decodedToken)
+export const genAccessToken = ({ _id, roles }: TokenProps) => {
+  const accessToken: string = jwt.sign(
+    { _id, roles },
+    process?.env?.ACCESS_TOKEN_SECRET!,
+    {
+      expiresIn: config.ACCESS_TOKEN_EXPIRES_IN,
+    }
+  );
+  return accessToken;
+};
 
-  }catch(e:any){
-    res.status(500).send("something went wrong:\n"+e.message)
+export const genRefreshToken = ({ _id, roles }: TokenProps) => {
+  const accessToken: string = jwt.sign(
+    { _id, roles },
+    process?.env?.REFRESH_TOKEN_SECRET!,
+    {
+      expiresIn: config.REFRESH_TOKEN_EXPIRES_IN,
+    }
+  );
+  return accessToken;
+};
+
+export const authentication = CatchAsyncError(
+  async (req: ExtendRequest, res: Response, next: NextFunction) => {
+    const token = req.get("authorization")?.split(" ")[1];
+    if (!token) throw new ApiError("auth: Token is required", 403);
+
+    try {
+      const payload = jwt.verify(
+        token,
+        process.env.ACCESS_TOKEN_SECRET!
+      ) as TokenProps;
+      req.user = payload;
+      next();
+    } catch (error) {
+      throw new ApiError("auth: Invalid token", 403);
+    }
   }
-}
-export const auth = (req:ExtendRequest,res:Response,next:NextFunction) =>{
-  console.log("authentication")
-  try {
-    const AuthorizationHeader = req.headers["authorization"]
-    console.log(AuthorizationHeader)
-    const startsWithBearer = AuthorizationHeader?.startsWith("Bearer")
-    if(!startsWithBearer)
-      return res.status(403).json({message:"token must start with Bearer"})
-    const token = AuthorizationHeader?.split(' ')[1] 
-    if (!token)
-      return res.status(403).json({message:"token is required"})
-    console.log(token,process?.env?.ACCESS_TOKEN_SECRET!)
-    jwt.verify(token,process?.env?.ACCESS_TOKEN_SECRET!, async (error,payload) =>{
-      if(error){
-        console.log(error);
-        return res.status(403).json({message:"token not valid"})
-      }
-        
-      if(!payload) 
-        return res.status(403).json({message:"token does not have payload"})
-      const {id} = payload as {id : string }
-      if(!id) 
-        return res.status(403).json({message:"token does not have expected payload"});
-      const seller  = await Seller.findOne({_id:id})
-      console.log(">> seller authenticated")
-      req.seller = seller
-      next()
-    })  
-  }catch(e:any){
-    res.status(500).send("something went wrong:\n"+e.message)
-  }
-}
-
-
-// export const auth =  () =>{
-//   return (req:ExtendRequest,res:Response,next:NextFunction) =>{
-//     console.log("authentication")
-//     try {
-//       const AuthorizationHeader = req.get('authorization')
-//       const startsWithBearer = AuthorizationHeader?.startsWith("Bearer")
-//       if(!startsWithBearer)
-//         return res.status(401).send("token must start with Bearer")
-//       const token = AuthorizationHeader?.split(' ')[1] 
-//       if (!token)
-//         return res.status(401).send("token is required")
-//       jwt.verify(token,process?.env?.ACCESS_TOKEN_SECRET!, async (error,payload) =>{
-//         if(error) 
-//           return res.status(403).send("token not valid")
-//         if(!payload) 
-//           return res.status(403).send("token does not have payload")
-//         const {email} = payload as {email : string }
-//         if(!email) 
-//           return res.status(403).send("token does not have expected payload");
-//         const seller  = await Seller.findOne({email})
-//         console.log(">> seller authenticated")
-//         req.seller = seller
-//         next()
-//       })  
-//     }catch(e:any){
-//       res.status(500).send("something went wrong:\n"+e.message)
-//     }
-//   }
-// }
+);

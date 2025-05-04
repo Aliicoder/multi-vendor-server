@@ -1,31 +1,52 @@
-import { Schema,Document,ObjectId, models, model } from 'mongoose'
-export interface IUnit {
-  productId : ObjectId
-  title: string
-  price: number
-  unitPrice : number
-  quantity : number
-}
-export interface ICart extends Document{
-  userId : ObjectId
-  units : IUnit[]
-  numberOfProducts : number
-  totalAmount : number
-  status : "active" | "settled"
-}
-const unitSchema = new Schema<IUnit>({
-  productId : {type: Schema.Types.ObjectId ,ref:"Product"},
-  title : {type: String,required: true},
-  price : { type:Number,required: true},
-  unitPrice : {type: Number,required: true},
-  quantity : {type: Number,required: true ,default: 1 },
-})
-const cartSchema = new Schema<ICart>({
-  userId : { type: Schema.Types.ObjectId , ref : "User",required: true},
-  units : { type: [unitSchema] },
-  numberOfProducts : { type: Number, default: 0},
-  totalAmount : { type: Number, default : 0 },
-  status : { type: String , enum : ["active","settled"], default: "active"},
-})
-const Cart = models.Cart || model<ICart>('Cart',cartSchema)
-export default Cart
+import { Schema, model } from "mongoose";
+import { ICart, ICartOrder, IUnit } from "../types/schema";
+
+export const UnitSchema = new Schema<IUnit>(
+  {
+    productId: { type: Schema.Types.ObjectId, ref: "Product", required: true },
+    price: { type: Number, required: true },
+    quantity: { type: Number, required: true },
+    shopName: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const OrderSchema = new Schema<ICartOrder>(
+  {
+    sellerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    amount: { type: Number, required: true },
+    units: { type: [UnitSchema], required: true },
+  },
+  { _id: false }
+);
+
+const CartSchema = new Schema<ICart>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    status: { type: String, enum: ["active", "settled"], default: "active" },
+    orders: { type: [OrderSchema], required: true },
+    paypalOrderId: { type: String },
+    transactionId: { type: Schema.Types.ObjectId, ref: "Transaction" },
+  },
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
+);
+
+CartSchema.virtual("totalAmount").get(function (this: any) {
+  return this.orders.reduce((total: number, order: ICartOrder) => {
+    return total + order.amount;
+  }, 0);
+});
+
+CartSchema.virtual("totalQuantity").get(function (this: any) {
+  return this.orders.reduce((total: number, order: ICartOrder) => {
+    const unitsTotal = order.units.reduce(
+      (sum, unit) => sum + unit.quantity,
+      0
+    );
+    return total + unitsTotal;
+  }, 0);
+});
+
+const Cart = model<ICart>("Cart", CartSchema);
+
+export default Cart;

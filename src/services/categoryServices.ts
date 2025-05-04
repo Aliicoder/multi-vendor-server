@@ -1,87 +1,104 @@
+import Category from "../models/Category";
+import {
+  ICreateCategoryParams,
+  IGetPaginatedCategoriesParams,
+} from "../types/params";
+import { HydratedDocument } from "mongoose";
+import ApiError from "../utils/apiError";
+import { ICategory } from "../types/schema";
 
-import formidable from "formidable"
-import Category from "../models/Category"
-import cloudinary from "../utils/cloudinary"
-import { error } from "console"
-interface AddCategoryDB {
-  nameField: string
-  descriptionField: string
-  parentNameField: string
-  imageField: formidable.File
-}
-
-export const addCategoryDB = async ({nameField,descriptionField,parentNameField,imageField}:AddCategoryDB) =>{
+export const getCategoriesDB = async (): Promise<any> => {
   try {
-    const category = await Category.findOne({name:nameField})
-    if(category)
-      return { statusCode :401 , error : "category already exists"}
-    const uploadImage = await cloudinary.v2.uploader.upload(imageField.filepath,
-      {folder:"categories"}
-    )
-    console.log(uploadImage)
-    if(!uploadImage)
-      return { statusCode :401 , error : "cant upload the image"}
-    console.log("parent name: ",parentNameField)
-    let parent = null
-    if(parentNameField !== "root")
-      parent = await Category.findOne({name:parentNameField})
-    console.log("parent",parent)
-    if(parent){
-      console.log("slug",parent.slug)
-      let slug = parent.slug.concat("/",nameField)
-      console.log(slug)
-      const data = await Category.create({name:nameField,image:uploadImage.url,slug,description:descriptionField,parent_id:parent._id})
-      console.log("nested",data)
-      return { statusCode : 201 }
+    const categories = await Category.find({ level: 1 })
+      .sort({ name: 1 })
+      .populate({
+        path: "children",
+        populate: {
+          path: "children",
+          populate: {
+            path: "children",
+          },
+        },
+      });
+
+    if (categories.length === 0) throw new ApiError("No categories found", 404);
+
+    return {
+      success: true,
+      categories,
+      statusCode: 200,
+      message: "categories fetched successfully",
+    };
+  } catch (error: any) {
+    throw new ApiError(error.message || "Failed to fetch categories", 500);
+  }
+};
+
+export const createCategoryDB = async (
+  params: ICreateCategoryParams
+): Promise<any> => {
+  try {
+    const { name, parentId } = params;
+    const existingCategory: HydratedDocument<ICategory> | null =
+      await Category.findOne({ name });
+    if (existingCategory)
+      throw new ApiError("Category with this name already exists", 409);
+
+    let level = 1;
+    let path: string[] = [name];
+
+    if (parentId) {
+      const parentCategory: HydratedDocument<ICategory> | null =
+        await Category.findById(parentId);
+      if (!parentCategory) throw new ApiError("Parent category not found", 404);
+      level = parentCategory.level + 1;
+      path = [...parentCategory.path, name];
     }
-    let slug = "".concat("/",nameField)
-    const data = await Category.create({name:nameField,image:uploadImage.url,slug,description:descriptionField})
-    console.log("root",data)
-    return { statusCode : 201 }
-  } catch (error) {
-    console.log(error)                                                                                                                                                                                                                                                                                                                            
-    return { statusCode : 500 , error : "something went wrong" }
+
+    const category: HydratedDocument<ICategory> | null = await Category.create({
+      name,
+      parentId: parentId || null,
+      path,
+      level,
+    });
+    return {
+      success: true,
+      data: category,
+      message: "Category created successfully",
+      statusCode: 201,
+    };
+  } catch (error: any) {
+    throw new ApiError(error.message || "Failed to create category", 500);
   }
-}
-export const fetchCategoriesNamesDB = async () =>{
-  try{
-    const categories = await Category.find({},{name:1})
-    console.log(categories)
-    if(!categories)
-      return { statusCode :401 , error : " cannot find categories"}
-    return { statusCode : 200 , categories}
-  }catch(error){
-    console.log(error)
-    return { statusCode : 500 , error : "something went wrong" }
+};
+export const getPaginatedCategoriesDB = async (
+  params: IGetPaginatedCategoriesParams
+): Promise<any> => {
+  try {
+    const { perPage = 10, curPage = 1, query } = params;
+
+    const total = await Category.countDocuments(query);
+    const categories = await Category.find(query)
+      .skip((curPage - 1) * perPage)
+      .limit(perPage);
+
+    if (categories.length === 0) throw new ApiError("No categories found", 404);
+
+    const result = {
+      categories,
+      currentPage: curPage,
+      perPage,
+      totalPages: Math.ceil(total / perPage),
+      totalItems: total,
+    };
+
+    return {
+      success: true,
+      categories: result.categories,
+      statusCode: 200,
+      message: "Categories fetched successfully",
+    };
+  } catch (error: any) {
+    throw new ApiError(error.message || "Failed to fetch categories", 500);
   }
-}
-interface FetchCategoriesChunkDB {
-  parsePerPage : number
-  safeSearchValue : string
-  parseCurPage : number
-}
-export const fetchCategoriesChunkDB = async ({parseCurPage,safeSearchValue,parsePerPage}:FetchCategoriesChunkDB) =>{
-  try{
-    if(safeSearchValue){
-      const categoriesLen = await Category.find({$text:{$search:safeSearchValue}}).countDocuments();
-      const skipCategories = (parseCurPage - 1) * parsePerPage
-      const categoriesChunk = 
-      await Category.find({$text:{$search:safeSearchValue}}).skip(skipCategories).limit(parsePerPage).sort({createdAt:-1})
-      console.log(categoriesChunk)
-      if(!categoriesChunk)
-        return { statusCode :401 , error : " cannot find categories"}
-      return { statusCode : 200 , categoriesChunk ,count:categoriesLen}
-    }else{
-      const categoriesLen = await Category.find({}).countDocuments();
-      const skip = (parseCurPage - 1) * parsePerPage
-      const categoriesChunk = await Category.find({}).skip(skip).limit(parsePerPage)
-      console.log(categoriesChunk)
-      if(!categoriesChunk)
-        return { statusCode :401 , error : " cannot find categories"}
-      return { statusCode : 200 , categoriesChunk : categoriesChunk , count:categoriesLen}
-    }
-  }catch(error){
-    console.log(error)
-    return { statusCode : 500 , error : "something went wrong" }
-  }
-}
+};

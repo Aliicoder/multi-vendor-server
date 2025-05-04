@@ -1,97 +1,220 @@
-import User, { IUser } from "../models/User"
-import { Response } from "express"
-import bcrypt from "bcrypt"
-import { genAccessAndRefreshTokens } from "../middlewares/authentication"
-import Cart from "../models/Cart"
-interface registerParams {
-  firstName: string
-  lastName: string
-  email: string
-  password: string
-}
-interface verifyParams {
-  email: string
-  password: string
-}
-export interface UserData {
-  firstName:string
-  lastName:string
-  roles:number[]
-  token: string
-  refreshToken?: string;
-}
-export const registerUser = async ({firstName,lastName,email,password}:registerParams) => {
- try{
-  const IsExistingUser = await User.findOne({email})
-  if(IsExistingUser)
-    return { statusCode: 409 , error :" user already exists"}
-  if(password.length < 8)
-    return { statusCode: 403 , error : "password too short "}
-  const hashedPassword = await bcrypt.hash(password,10)
-  const tokens = genAccessAndRefreshTokens({email})
-  const newUser = new User({firstName,lastName,email,password:hashedPassword,refreshToken:tokens.refreshToken})
-  const user = await newUser.save()
-  const addActiveCartToUser = await Cart.create({userId:user._id,status:"active"})
-  if(!addActiveCartToUser){
-    await User.findOneAndDelete({email})
-    return { statusCode: 409, error : "cart did not added successfully"}
-  }
-  const data:UserData = {
-    firstName: user.firstName,
-    lastName: user.lastName,
-    roles:user.roles,
-    token: tokens.accessToken,
-    refreshToken: tokens.refreshToken
-  }
-  return  { statusCode : 201 , data }
- }catch(e:any){
-    return { statusCode : 500 , error : "something went wrong : "+e.message}
- }
-}
+import { User } from "../models/User";
+import {
+  IAddAddressParams,
+  IDeleteAddressParams,
+  IGetPaginatedUsersParams,
+  IUpdateAddressParams,
+} from "../types/params";
+import { IAddress, ISellerStatus } from "../types/schema";
+import ApiError from "../utils/apiError";
 
-export const verifyUser = async ({email,password}:verifyParams) =>{
-  try{
-    const user = await User.findOne({email}).select("+password")
-    if(!user)
-      return { statusCode: 404 , error : "user not found"}
-    const validPassword = await bcrypt.compare(password,user.password)
-    if(!validPassword)
-      return { statusCode : 401 , error : "invalid email or password" }
-    const tokens = genAccessAndRefreshTokens({email});
-    user.refreshToken = tokens.refreshToken;
-    const data:UserData = {
-      firstName: user.firstName,
-      lastName: user.lastName,
-      roles: user.roles,
-      token: tokens.accessToken,
-      refreshToken: tokens.refreshToken
+export const getPaginatedUsersDB = async (
+  params: IGetPaginatedUsersParams
+): Promise<any> => {
+  try {
+    const { curPage = 1, perPage = 10, sort, query } = params;
+    const skip = (curPage - 1) * perPage;
+    let users, total;
+    if (sort) {
+      [users, total] = await Promise.all([
+        User.find(query).sort(sort).skip(skip).limit(perPage),
+        User.countDocuments(query),
+      ]);
+    } else {
+      [users, total] = await Promise.all([
+        User.find(query).skip(skip).limit(perPage),
+        User.countDocuments(query),
+      ]);
     }
+
+    return {
+      sellers: users,
+      total,
+      page: curPage,
+      perPage,
+      pagesLen: Math.ceil(total / perPage),
+      statusCode: 200,
+      message: "Users fetched successfully",
+    };
+  } catch (error: any) {
+    throw new ApiError(error.message ?? "Failed to fetch users", 500);
+  }
+};
+export const acceptApplicantDB = async (
+  userId: string,
+  status: ISellerStatus
+): Promise<any> => {
+  try {
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { sellerStatus: status },
+      { new: true }
+    );
+
+    if (!updatedUser) throw new ApiError("User not found", 404);
+    return {
+      success: true,
+      message: "User status updated successfully",
+      user: updatedUser,
+      statusCode: 201,
+    };
+  } catch (error: any) {
+    throw new ApiError(error.message ?? "Failed to update user status", 500);
+  }
+};
+
+export const rejectApplicantDB = async (
+  userId: string,
+  status: ISellerStatus
+): Promise<any> => {
+  try {
+    const user = await User.findById(userId);
+
+    if (!user) throw new ApiError("User not found", 404);
+    const update: any = {
+      sellerStatus: status,
+      $pull: { roles: "seller" },
+    };
+
+    if (user.roles.length <= 1) {
+      update.$addToSet = { roles: "client" };
+    }
+
+    update.businessAddresses = [];
+    update.description = "";
+
+    const updatedUser = await User.findByIdAndUpdate(userId, update, {
+      new: true,
+    });
+
+    return {
+      success: true,
+      message: "User reverted to client successfully",
+      user: updatedUser,
+      statusCode: 201,
+    };
+  } catch (error: any) {
+    throw new ApiError(error.message ?? "Failed to reject applicant", 500);
+  }
+};
+
+export const addAddressDB = async (params: IAddAddressParams): Promise<any> => {
+  try {
+    const { userId, province, city, street, phone, lng, lat } = params;
+    const user = await User.findById(userId);
+    if (!user) throw new ApiError("User not found", 404);
+    const addressData: IAddress = {
+      lng,
+      lat,
+      street,
+      city,
+      phone,
+      province,
+    };
+
+    user.addresses.push(addressData);
     await user.save();
-    return { statusCode : 200 , data }
-  }catch(e:any){
-    return { statusCode : 500 , error : "something went wrong : \n" + e.message}
+    console.log(user.addresses);
+    return {
+      success: true,
+      message: "Address added successfully",
+      addresses: user.addresses,
+      statusCode: 201,
+    };
+  } catch (error: any) {
+    throw new ApiError(error.message ?? "Failed to add address", 500);
   }
-}
-interface RefreshTokenProps {
-  refreshToken: string
-  res:Response
-}
-export const logOutDB = async ({refreshToken,res}:RefreshTokenProps)=>{
-  try{
-    const user : IUser | null = await User.findOne({refreshToken})
-    if(!user){
-      res.clearCookie('jwt',{
-        httpOnly: true
-      })
-      return { statusCode : 403 , error : "user not found" }
+};
+
+export const updateAddressDB = async (
+  params: IUpdateAddressParams
+): Promise<any> => {
+  try {
+    const { userId, province, city, street, phone, lng, lat, addressId } =
+      params;
+    const user = await User.findById(userId);
+    if (!user) throw new ApiError("User not found", 404);
+    const addressData: IAddress = {
+      lng,
+      lat,
+      street,
+      city,
+      phone,
+      province,
+    };
+
+    user.addresses = user.addresses.map((addr) => {
+      if (addr._id?.toString() == addressId) {
+        return addressData;
+      }
+      return addr;
+    });
+
+    await user.save();
+
+    return {
+      success: true,
+      message: "Address updated successfully",
+      addresses: user.addresses,
+      statusCode: 201,
+    };
+  } catch (error: any) {
+    throw new ApiError(error.message ?? "Failed to updated address", 500);
+  }
+};
+
+export const deleteAddressDB = async ({
+  userId,
+  addressId,
+}: IDeleteAddressParams): Promise<any> => {
+  try {
+    const user = await User.findById(userId);
+
+    if (!user) throw new ApiError("User not found", 404);
+
+    user.addresses = user.addresses.filter(
+      (addr) => addr._id?.toString() != addressId
+    );
+
+    await user.save();
+
+    return {
+      success: true,
+      message: "Address deleted successfully",
+      addresses: user.addresses,
+      statusCode: 201,
+    };
+  } catch (error: any) {
+    throw new ApiError(error.message ?? "Failed to delete address", 500);
+  }
+};
+
+export const setDefaultAddressDB = async ({
+  userId,
+  addressId,
+}: IDeleteAddressParams): Promise<any> => {
+  try {
+    const user = await User.findById(userId);
+
+    if (!user) throw new ApiError("User not found", 404);
+    let defaultAddress;
+    user.addresses = user.addresses.filter((addr) => {
+      if (addr._id?.toString() != addressId) return addr;
+      defaultAddress = addr;
+    });
+    if (!defaultAddress) {
+      return { success: false, error: "Address not found", statusCode: 404 };
     }
-    user.refreshToken = ""
-    res.clearCookie('jwt',{
-      httpOnly: true
-    })
-    await user.save()
-    return { statusCode :200, data : "" }
-  }catch(e:any){
-    return { statusCode : 500 , error : "something went wrong : \n" + e.message}
+    user.addresses.push(defaultAddress);
+    await user.save();
+
+    return {
+      success: true,
+      message: "Address set as default successfully",
+      addresses: user.addresses,
+      statusCode: 201,
+    };
+  } catch (error: any) {
+    throw new ApiError(error.message ?? "Failed to set default address", 500);
   }
-}
+};

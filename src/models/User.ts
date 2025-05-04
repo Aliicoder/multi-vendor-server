@@ -1,24 +1,46 @@
-import {Schema,Document,models,model, ObjectId} from "mongoose";
-import validator from "validator"
-export interface IBuyer extends Document  {
-  name: string
-  email: string
-  address: string
-  roles: number[]
-  password: string
-  refreshToken: string
-}
-const BuyerSchema = new Schema<IBuyer>({
-  name:{type: String , trim:true ,required: true},
-  address:{type: String , trim:true },
-  roles:{type: [Number], required: true , default : [2001] },
-  email:{type: String,unique: true ,required: true ,validate:[validator.isEmail]},
-  password:{type: String, trim:true ,required: true,select:false},
-  refreshToken:{type: String, trim:true}
-},{
-   timestamps: true
-})
+import mongoose, { Schema } from "mongoose";
+import { IAddress, IUser } from "../types/schema";
 
-const Buyer = models.Buyer || model<IBuyer>('Buyer',BuyerSchema);
+const AddressSchema = new Schema<IAddress>({
+  lng: { type: Number },
+  lat: { type: Number },
+  city: { type: String },
+  street: { type: String },
+  phone: { type: String },
+  province: { type: String },
+});
 
-export default Buyer
+const UserSchema = new Schema<IUser>(
+  {
+    name: { type: String, required: true },
+    media: { type: String },
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    sellerStatus: {
+      type: String,
+      enum: ["active", "inactive", "pending"],
+      default: "pending",
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "fulfilled"],
+      default: "pending",
+    },
+    roles: [
+      {
+        type: String,
+        enum: ["admin", "client", "seller", "courier"],
+        default: ["client"],
+      },
+    ],
+    method: { type: String, enum: ["standard", "google"], default: "standard" },
+    description: { type: String, default: "" },
+    refreshToken: { type: String },
+    googleId: { type: String },
+    addresses: { type: [AddressSchema], default: [] },
+    businessAddresses: { type: [AddressSchema], default: [] },
+  },
+  { timestamps: true }
+);
+
+export const User = mongoose.model<IUser>("User", UserSchema);

@@ -1,0 +1,31 @@
+import dotenv from "dotenv";
+
+dotenv.config();
+
+export const config = {
+  NODE_ENV: process.env.NODE_ENV || "development",
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+  EXCHANGE_RATE_API_KEY: process.env.EXCHANGE_RATE_API_KEY,
+  REDIS_URL: process.env.REDIS_URL,
+  ACCESS_TOKEN_SECRET: process.env.ACCESS_TOKEN_SECRET!,
+  REFRESH_TOKEN_SECRET: process.env.REFRESH_TOKEN_SECRET!,
+  PAYPAL_BASE_URL: process.env.PAYPAL_BASE_URL,
+  ACCESS_TOKEN_EXPIRES_IN: process.env.ACCESS_TOKEN_EXPIRES_IN!,
+  REFRESH_TOKEN_EXPIRES_IN: process.env.REFRESH_TOKEN_EXPIRES_IN!,
+  PAYPAL_CLIENT_ID: process.env.PAYPAL_CLIENT_ID!,
+  PAYPAL_CLIENT_SECRET: process.env.PAYPAL_CLIENT_SECRET!,
+  PAYPAL_REDIRECT_URL: process.env.PAYPAL_REDIRECT_URL,
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+  PORT: process.env.DEV_PORT || 3001,
+  REDIS_USERNAME: process.env.REDIS_USERNAME!,
+  REDIS_PASSWORD: process.env.REDIS_PASSWORD!,
+  REDIS_HOST: process.env.REDIS_HOST!,
+  REDIS_PORT: Number(process.env.REDIS_PORT!),
+  DOMAIN: process.env.DOMAIN || "localhost",
+  CONNECTION_URL: process.env.CONNECTION_URL!,
+  AWS_REGION: process.env.AWS_REGION!,
+  AWS_BUCKET_NAME: process.env.AWS_BUCKET_NAME!,
+  AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID!,
+  AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY!,
+};

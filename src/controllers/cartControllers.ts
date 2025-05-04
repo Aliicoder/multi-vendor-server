@@ -1,70 +1,101 @@
-import { Response } from "express-serve-static-core"
-import { addUnIntoActiveCartDB , checkOutDB, deleteAllUnitsDB, deleteOneUnitFromCartDB, getUserActiveCartDB, updateUserCartDB } from "../services/cartServices"
-import { ExtendRequest } from "../middlewares/authentication"
-export const getUserActiveCart = async (req:ExtendRequest,res:Response)=>{
-  const userId = req.user._id 
-  const {statusCode, data} = await getUserActiveCartDB({userId}) 
-  if(statusCode.toString().startsWith("4"))
-    return res.status(statusCode).send(data)
-  res.status(statusCode).send(data)
-}
-export const addUnitIntoActiveCart = async (req: ExtendRequest, res: Response)=>{
- try {
-  const userId = req.user._id
-  const newUnit = { productId :req.body.productId, quantity :req.body.quantity}
-  const { statusCode, data } = await addUnIntoActiveCartDB({userId,newUnit});
-  if(statusCode.toString().startsWith("4"))
-    return res.status(statusCode).send(data)
-  res.status(statusCode).send(data)
- } catch (e:any) {
-  return { statusCode : 500 , data: "something went wrong :\n"+e.message}
- }
-}
-export const deleteAllUnits = async (req: ExtendRequest, res: Response)=>{
-  try {
-    const userId = req.user._id
-    const {statusCode, data} = await deleteAllUnitsDB({userId});
-    if(statusCode.toString().startsWith("4"))
-      return res.status(statusCode).send(data)
-    res.status(statusCode).send(data)
-  } catch (e:any) {
-    return { statusCode : 500 , data: "something went wrong :\n"+e.message}
+import { NextFunction, Response } from "express-serve-static-core";
+import {
+  addProductToCartDB,
+  cashCheckoutDB,
+  deleteProductFromCartDB,
+  getUserPopulatedActiveCartDB,
+  paypalCaptureOrderDB,
+  paypalCreateOrderDB,
+} from "../services/cartServices";
+import { CatchAsyncError } from "../utils/catchAsync";
+import {
+  IAddProductToCartParams,
+  IDeleteProductFromCartParams,
+} from "../types/params";
+import { ExtendRequest } from "../types/custom";
+export const getUserActiveCart = CatchAsyncError(
+  async (req: ExtendRequest, res: Response) => {
+    const userId = req.user._id;
+    const result = await getUserPopulatedActiveCartDB({
+      userId,
+    });
+    return res.status(result.statusCode).json({
+      success: true,
+      message: result.message,
+      cart: result.cart,
+    });
   }
-}
-export const deleteOneUnitFromCart = async (req: ExtendRequest, res: Response)=>{
-  try {
-    const userId = req.user._id
-    const productId = req.params.productId
-    if (!productId)
-      res.status(400).send("product id not specified")
-    const {statusCode, data} = await deleteOneUnitFromCartDB({userId,productId})
-    if(statusCode.toString().startsWith("4"))
-      return res.status(statusCode).send(data)
-    res.status(statusCode).send(data)
-  } catch (e:any) {
-    return { statusCode : 500 , data: "something went wrong :\n"+e.message}
+);
+
+export const addProductToCart = CatchAsyncError(
+  async (req: ExtendRequest, res: Response) => {
+    const userId = req.user._id;
+    const { productId } = req.body as IAddProductToCartParams;
+    const result = await addProductToCartDB({
+      userId,
+      productId,
+    });
+    return res.status(result.statusCode).json({
+      success: true,
+      message: result.message,
+      cart: result.cart,
+    });
   }
-}
-export const updateUserCart = async (req: ExtendRequest, res: Response) =>{
-  try {
-    const userId = req.user._id
-    const updatedUnit = { productId :req.body.productId, quantity :req.body.quantity}
-    const {statusCode, data} = await updateUserCartDB({userId,updatedUnit})
-    res.status(statusCode).send(data)
-  } catch (e:any) {
-    return { statusCode : 500 , data: "something went wrong :\n"+e.message}
+);
+
+export const deleteProductFromCart = CatchAsyncError(
+  async (req: ExtendRequest, res: Response) => {
+    const userId = req.user._id;
+    const { productId } = req.body as IDeleteProductFromCartParams;
+    const result = await deleteProductFromCartDB({
+      userId,
+      productId,
+    });
+    return res.status(result.statusCode).json({
+      success: true,
+      message: result.message,
+      cart: result.cart,
+    });
   }
-}
-export const checkOut = async (req: ExtendRequest, res: Response) =>{
-  try {
-    const userId = req.user._id
-    const defaultAddress = req.user.address
-    const address = req.body.address ?? null
-    const {statusCode, data} = await checkOutDB({userId,address,defaultAddress})
-    if(statusCode.toString().startsWith("4"))
-      return res.status(statusCode).send(data)
-    res.status(statusCode).send(data)
-  } catch (e:any) {
-    return { statusCode : 500 , data: "something went wrong :\n"+e.message}
+);
+
+export const cashCheckout = CatchAsyncError(
+  async (req: ExtendRequest, res: Response, _next: NextFunction) => {
+    const userId = req.user._id;
+    const result = await cashCheckoutDB({
+      userId,
+    });
+    return res.status(result.statusCode).json({
+      success: true,
+      message: result.message,
+    });
   }
-}
+);
+
+export const paypalCreateOrder = CatchAsyncError(
+  async (req: ExtendRequest, res: Response) => {
+    const result = await paypalCreateOrderDB({
+      userId: req.user._id,
+    });
+
+    return res.status(result.statusCode).json({
+      success: true,
+      orderId: result.orderId,
+      message: result.message,
+    });
+  }
+);
+
+export const paypalCaptureOrder = CatchAsyncError(
+  async (req: ExtendRequest, res: Response) => {
+    const { orderId } = req.body;
+    const result = await paypalCaptureOrderDB({
+      userId: req.user._id,
+      orderId,
+    });
+    return res.status(result.statusCode).json({
+      success: true,
+      message: result.message,
+    });
+  }
+);
