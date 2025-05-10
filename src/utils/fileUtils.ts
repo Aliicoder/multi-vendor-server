@@ -1,8 +1,10 @@
 import { UploadedFile } from "express-fileupload";
 
-export const getFileType = (mimeType: string): "image" | "video" => {
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
+export const getFileType = (
+  mimeType: string | undefined
+): "image" | "video" => {
+  if (mimeType?.startsWith("image/")) return "image";
+  if (mimeType?.startsWith("video/")) return "video";
   throw new Error("Unsupported file type");
 };
 

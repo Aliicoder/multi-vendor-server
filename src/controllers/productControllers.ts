@@ -10,7 +10,6 @@ import {
 import { CatchAsyncError } from "../utils/catchAsync";
 import { NextFunction } from "express";
 import ApiError from "../utils/apiError";
-import { UploadedFile } from "express-fileupload";
 import { IFetchProductsParams } from "../types/params";
 import Category from "../models/Category";
 import { ExtendRequest } from "../types/custom";
@@ -22,13 +21,19 @@ export const getPaginatedProducts = CatchAsyncError(
       perPage = 5,
       category,
       sort,
+      name,
     } = req.query as unknown as IFetchProductsParams;
     const excludeFields = ["sort", "name", "curPage", "perPage", "category"];
     let query = Object.fromEntries(
       Object.entries(req.query).filter(([key]) => !excludeFields.includes(key))
     ) as any;
+    query = JSON.stringify(query).replace(
+      /\bgte|gt|lte|lt\b/g,
+      (match) => `$${match}`
+    );
 
-    if (query.name) query.name = { $regex: new RegExp(query.name as string) };
+    query = JSON.parse(query);
+    if (name) query.name = { $regex: name, $options: "i" };
 
     if (category) {
       const path = await Category.findOne({ name: category }).then(
@@ -50,6 +55,9 @@ export const getPaginatedProducts = CatchAsyncError(
       products: result.products,
       pagesLen: result.pagesLen,
       message: result.message,
+      maxPrice: result.maxPrice,
+      maxStock: result.maxStock,
+      maxSales: result.maxSales,
     });
   }
 );
@@ -62,6 +70,7 @@ export const getProduct = CatchAsyncError(
       success: true,
       product: result.product,
       message: result.message,
+      data: result.product,
     });
   }
 );
@@ -83,15 +92,20 @@ export const getSearchedProducts = CatchAsyncError(
 
 export const getAISearchedProducts = CatchAsyncError(
   async (req: ExtendRequest, res: Response) => {
-    const { prompt } = req.body;
+    const { prompt, curPage = 1, perPage = 5, outOfStock = false } = req.body;
 
     if (!prompt || typeof prompt !== "string")
       throw new ApiError("Search query is required", 400);
 
-    const result = await getAISearchedProductsDB({ prompt });
+    const result = await getAISearchedProductsDB({
+      prompt,
+      curPage,
+      perPage,
+      outOfStock,
+    });
     return res.status(200).json({
       success: true,
-      products: result.products,
+      products: result.data,
       message: result.message,
     });
   }
@@ -101,7 +115,7 @@ export const addProduct = CatchAsyncError(
   async (req: ExtendRequest, res: Response, next: NextFunction) => {
     const userId = req.user._id;
     const { files, body } = req;
-    const media = files?.media as UploadedFile[];
+    console.log("body : ", body);
 
     const requiredFields = [
       "name",
@@ -122,10 +136,11 @@ export const addProduct = CatchAsyncError(
       );
     }
 
-    if (!files || !files.media)
-      throw new ApiError("Product media is required", 400);
-
-    const mediaFiles = Array.isArray(media) ? media : [media];
+    const media = files?.media
+      ? Array.isArray(files.media)
+        ? files.media
+        : [files.media]
+      : [];
 
     const productData = {
       sellerId: userId,
@@ -136,7 +151,7 @@ export const addProduct = CatchAsyncError(
       stock: Number(body.stock),
       price: Number(body.price),
       discount: Number(body.discount) || 0,
-      media: mediaFiles,
+      media,
     };
 
     const result = await addProductDB(productData);
@@ -144,6 +159,7 @@ export const addProduct = CatchAsyncError(
     return res.status(result.statusCode).json({
       success: true,
       message: result.message,
+      product: result.data,
     });
   }
 );
@@ -153,7 +169,6 @@ export const updateProduct = CatchAsyncError(
     req.body.productId = req.params.productId;
     req.body.sellerId = req.user._id;
     const { files, body } = req;
-    let media = (files?.media as UploadedFile[]) || [];
 
     const requiredFields = [
       "productId",
@@ -162,7 +177,6 @@ export const updateProduct = CatchAsyncError(
       "description",
       "brand",
       "discount",
-      "deletedMedia",
       "stock",
       "price",
       "category",
@@ -177,8 +191,16 @@ export const updateProduct = CatchAsyncError(
         )
       );
     }
-
-    const mediaFiles = Array.isArray(media) ? media : [media];
+    const media = files?.media
+      ? Array.isArray(files.media)
+        ? files.media
+        : [files.media]
+      : [];
+    const deletedMedia = body.deletedMedia
+      ? Array.isArray(body.deletedMedia)
+        ? body.deletedMedia
+        : [body.deletedMedia]
+      : [];
 
     const productData = {
       productId: body.productId,
@@ -190,15 +212,15 @@ export const updateProduct = CatchAsyncError(
       stock: Number(body.stock),
       price: Number(body.price),
       discount: Number(body.discount) || 0,
-      media: mediaFiles,
-      deletedMedia: JSON.parse(body.deletedMedia) as string[],
+      media,
+      deletedMedia,
     };
 
     const result = await updateProductDB(productData);
-
     return res.status(result.statusCode).json({
       success: true,
       message: result.message,
+      product: result.data,
     });
   }
 );

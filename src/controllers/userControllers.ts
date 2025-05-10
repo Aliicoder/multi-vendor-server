@@ -1,7 +1,10 @@
 import { Request, Response } from "express";
-import bcrypt from "bcrypt";
 import { User } from "../models/User";
-import { IAddAddressParams, IGetPaginatedUsersParams } from "../types/params";
+import {
+  IAddAddressParams,
+  IGetPaginatedUsersParams,
+  IOnboardingParams,
+} from "../types/params";
 import { createAccessToken, createRefreshToken } from "../utils/tokenUtils";
 import jwt from "jsonwebtoken";
 import ApiError from "../utils/apiError";
@@ -12,161 +15,33 @@ import {
   addAddressDB,
   deleteAddressDB,
   getPaginatedUsersDB,
+  onboardingDB,
   rejectApplicantDB,
   setDefaultAddressDB,
+  signup,
   updateAddressDB,
 } from "../services/userServices";
 import client from "../utils/googleClient";
 import { config } from "../config/environment";
 import { ExtendRequest, IAuthState } from "../types/custom";
 import { ISellerStatus, IUser, Role } from "../types/schema";
-
-export const signup = CatchAsyncError(async (req: Request, res: Response) => {
-  const { email, description, name, password, requestedRole } = req.body;
-
-  const validRoles: Role[] = ["client", "seller", "courier"];
-  if (!validRoles.includes(requestedRole)) {
-    throw new ApiError("Invalid role request", 400);
-  }
-
-  let user = await User.findOne({ email });
-
-  if (!user) {
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    const userData: Partial<IUser> = {
-      name,
-      email,
-      password: hashedPassword,
-      roles: [requestedRole],
-      method: "standard",
-      addresses: [],
-    };
-
-    if (requestedRole === "seller") {
-      userData.description = description;
-      userData.sellerStatus = "pending";
-      userData.businessAddresses = [];
-    }
-
-    user = await User.create(userData);
-  } else {
-    if (user.roles.includes(requestedRole)) {
-      throw new ApiError(`You already have a ${requestedRole} account`, 400);
-    }
-
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      throw new ApiError("Invalid credentials", 401);
-    }
-
-    user.roles.push(requestedRole);
-
-    if (requestedRole === "seller") {
-      user.sellerStatus = "pending";
-      user.description = description;
-    }
-
-    await user.save();
-  }
-
-  res.status(201).json({
-    success: true,
-    message: "signed up successfully",
-  });
-});
+import twilioClient from "../utils/twilioUtils";
+import { generateOTP, sendOTPEmail } from "../utils/sendGridUtils";
+import { redisClient } from "../utils/redisClient";
+import { loginDB } from "../services/userServices";
 
 export const login = CatchAsyncError(async (req: Request, res: Response) => {
   const { email, password } = req.body;
-
-  const user: HydratedDocument<IUser> | null = await User.findOne({ email });
-  console.log("user ", user);
-  if (!user) {
-    throw new ApiError("Invalid credentials", 400);
-  }
-
-  const isMatch = await bcrypt.compare(password, user.password);
-  if (!isMatch) {
-    throw new ApiError("Invalid credentials", 400);
-  }
-
-  const refreshToken = createRefreshToken(user._id.toString());
-  user.refreshToken = refreshToken;
-  await user.save();
-
-  res.cookie("refreshToken", refreshToken, {
+  const result = await loginDB({ email, password });
+  console.log("login result ", result);
+  res.cookie("refreshToken", result.refreshToken, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    secure: config.NODE_ENV === "production",
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
-
-  const accessToken = createAccessToken(user._id.toString());
-  const auth: IAuthState = {
-    userId: user._id,
-    name: user.name,
-    email: user.email,
-    accessToken,
-    ...(user.addresses && { addresses: user.addresses }),
-    ...(user.sellerStatus && { sellerStatus: user.sellerStatus }),
-    roles: user.roles,
-  };
-  res.status(200).json({ user: auth, message: "login successful" });
-});
-
-export const refreshAccessToken = CatchAsyncError(
-  async (req: Request, res: Response) => {
-    const token = req.cookies.refreshToken;
-    if (!token) {
-      throw new ApiError("No refresh token provided", 401);
-    }
-
-    const decoded = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET!) as {
-      _id: string;
-    };
-
-    const user: HydratedDocument<IUser> | null = await User.findById(
-      decoded._id
-    );
-    if (!user || user.refreshToken !== token) {
-      throw new ApiError("Invalid refresh token", 403);
-    }
-
-    const accessToken = createAccessToken(user._id.toString());
-
-    const auth: IAuthState = {
-      userId: user._id,
-      name: user.name,
-      email: user.email,
-      accessToken,
-      ...(user.addresses && { addresses: user.addresses }),
-      ...(user.sellerStatus && { sellerStatus: user.sellerStatus }),
-      roles: user.roles,
-    };
-
-    res.status(200).json({ user: auth, message: "refreshed access token" });
-  }
-);
-
-export const logout = CatchAsyncError(async (req: Request, res: Response) => {
-  const token = req.cookies.refreshToken;
-  if (token) {
-    const user: HydratedDocument<IUser> | null = await User.findOne({
-      refreshToken: token,
-    });
-    if (user) {
-      user.refreshToken = "";
-      await user.save();
-    }
-  }
-
-  res.clearCookie("refreshToken", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
-  });
-  console.log("logout successful");
-  res.status(403).json({ message: "logout successful" });
+  res
+    .status(result.statusCode)
+    .json({ user: result.user, message: result.message });
 });
 
 export const googleLogin = CatchAsyncError(
@@ -199,6 +74,7 @@ export const googleLogin = CatchAsyncError(
     } else {
       if (!user.googleId) {
         user.googleId = googleId;
+        user.method = "google";
       }
     }
 
@@ -209,7 +85,6 @@ export const googleLogin = CatchAsyncError(
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: config.NODE_ENV === "production",
-      sameSite: "strict",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -221,7 +96,9 @@ export const googleLogin = CatchAsyncError(
       email: user.email,
       accessToken,
       ...(user.addresses && { addresses: user.addresses }),
+      ...(user.sellerStatus && { sellerStatus: user.sellerStatus }),
       roles: user.roles,
+      boarded: user.boarded,
     };
 
     res.status(200).json({
@@ -229,6 +106,162 @@ export const googleLogin = CatchAsyncError(
       user: auth,
       message: "Login successful",
     });
+  }
+);
+
+export const onboarding = CatchAsyncError(
+  async (req: Request, res: Response) => {
+    const { userId } = req.params as unknown as IOnboardingParams;
+    const { businessName, description } = req.body as IOnboardingParams;
+    const result = await onboardingDB({ userId, businessName, description });
+    res
+      .status(result.statusCode)
+      .json({ user: result.user, message: result.message });
+  }
+);
+
+export const refreshAccessToken = CatchAsyncError(
+  async (req: Request, res: Response) => {
+    const refreshToken = req.cookies.refreshToken;
+    console.log("refreshToken ", refreshToken);
+    if (!refreshToken) {
+      console.log("🛡️ No refresh token provided ~ logging out");
+      throw new ApiError("No refresh token provided", 403);
+    }
+    const decoded = jwt.verify(
+      refreshToken,
+      process.env.REFRESH_TOKEN_SECRET!
+    ) as {
+      _id: string;
+    };
+
+    const user: HydratedDocument<IUser> | null = await User.findById(
+      decoded._id
+    );
+    if (!user || user.refreshToken !== refreshToken) {
+      console.log("🛡️ Invalid refresh token ~ logging out");
+      throw new ApiError("Invalid refresh token", 403);
+    }
+
+    const accessToken = createAccessToken(user._id.toString());
+
+    const auth: IAuthState = {
+      userId: user._id,
+      name: user.name,
+      email: user.email,
+      accessToken,
+      ...(user.addresses && { addresses: user.addresses }),
+      ...(user.sellerStatus && { sellerStatus: user.sellerStatus }),
+      roles: user.roles,
+      boarded: user.boarded,
+    };
+    res.status(200).json({ user: auth, message: "refreshed access token" });
+  }
+);
+
+export const logout = CatchAsyncError(async (req: Request, res: Response) => {
+  const refreshToken = req.cookies.refreshToken;
+
+  if (refreshToken) {
+    const user: HydratedDocument<IUser> | null = await User.findOne({
+      refreshToken,
+    });
+    if (user) {
+      user.refreshToken = "";
+      await user.save();
+    }
+  }
+
+  res.clearCookie("refreshToken", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+  });
+  console.log("🛡️ logging out");
+
+  res.status(401).json({ message: "logout successful" });
+});
+
+export const sendMobileOtp = CatchAsyncError(
+  async (req: Request, res: Response) => {
+    const { phone } = req.body;
+
+    if (!phone) {
+      return res
+        .status(422)
+        .json({ success: false, message: "Phone number is required" });
+    }
+    const verification = await twilioClient.verify.v2
+      .services(config.TWILIO_VERIFY_SERVICE_SID)
+      .verifications.create({
+        to: phone,
+        channel: "sms",
+      });
+
+    res.status(200).json({
+      success: true,
+      message: "OTP sent successfully",
+      verificationSid: verification.sid,
+    });
+  }
+);
+
+export const verifyMobileOtp = CatchAsyncError(
+  async (req: Request, res: Response) => {
+    const { phone, otp } = req.body;
+    if (!phone || !otp) {
+      return res.status(422).json({
+        success: false,
+        message: "Phone number and OTP are required",
+      });
+    }
+
+    const verificationCheck = await twilioClient.verify.v2
+      .services(config.TWILIO_VERIFY_SERVICE_SID)
+      .verificationChecks.create({ to: phone, code: otp });
+
+    if (verificationCheck.status === "approved") {
+      res.status(200).json({
+        success: true,
+        message: "Phone number verified successfully!",
+        verificationCheck,
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: "Invalid OTP. Please try again.",
+        status: verificationCheck.status,
+      });
+    }
+  }
+);
+
+export const sendEmailOtp = CatchAsyncError(
+  async (req: Request, res: Response) => {
+    const { email } = req.body;
+    if (!email) throw new ApiError("Email is required", 422);
+    const otp = generateOTP();
+    await sendOTPEmail(email, otp);
+
+    await redisClient.set(`email-otp-${email}`, otp, { EX: 10 * 60 });
+    res.status(200).json({ message: "OTP sent successfully" });
+  }
+);
+
+export const verifyEmailOtp = CatchAsyncError(
+  async (req: Request, res: Response) => {
+    const { email, otp, name, password, requestedRole } = req.body;
+    if (!email || !otp) throw new ApiError("Email and OTP are required", 422);
+    const storedOtp = await redisClient.get(`email-otp-${email}`);
+
+    if (!storedOtp) throw new ApiError("OTP expired. Please try again.", 400);
+    if (otp !== storedOtp)
+      throw new ApiError("Invalid OTP. Please try again.", 400);
+
+    await redisClient.del(`email-otp-${email}`);
+    const result = await signup({ email, name, password, requestedRole });
+    res
+      .status(result.statusCode)
+      .json({ message: result.message, success: result.success });
   }
 );
 
@@ -267,9 +300,7 @@ export const acceptApplicant = CatchAsyncError(
   async (req: Request, res: Response) => {
     const { userId } = req.params;
     const result = await acceptApplicantDB(userId, "active");
-    if (!result.success) {
-      return res.status(result.statusCode).json({ message: result.message });
-    }
+
     res.status(result.statusCode).json({ message: result.message, result });
   }
 );
@@ -278,9 +309,6 @@ export const rejectApplicant = CatchAsyncError(
   async (req: Request, res: Response) => {
     const { userId } = req.params;
     const result = await rejectApplicantDB(userId, "inactive");
-    if (!result.success) {
-      return res.status(result.statusCode).json({ message: result.message });
-    }
     res.status(result.statusCode).json({ message: result.message, result });
   }
 );
@@ -315,10 +343,6 @@ export const addAddress = CatchAsyncError(
       lng,
       lat,
     });
-
-    if (!result.success) {
-      return res.status(result.statusCode).json({ message: result.message });
-    }
 
     res
       .status(result.statusCode)
@@ -359,8 +383,6 @@ export const updateAddress = CatchAsyncError(
       lat,
     });
 
-    if (!result.success) throw new ApiError(result.message, result.statusCode);
-
     res.status(result.statusCode).json({
       success: true,
       message: result.message,
@@ -382,8 +404,6 @@ export const deleteAddress = CatchAsyncError(
 
     const result = await deleteAddressDB({ userId, addressId });
 
-    if (!result.success) throw new ApiError(result.message, result.statusCode);
-
     res.status(result.statusCode).json({
       success: true,
       message: result.message,
@@ -404,8 +424,6 @@ export const setDefaultAddress = CatchAsyncError(
       );
 
     const result = await setDefaultAddressDB({ userId, addressId });
-
-    if (!result.success) throw new ApiError(result.message, result.statusCode);
 
     res.status(result.statusCode).json({
       success: true,

@@ -35,23 +35,17 @@ export const getUserPopulatedActiveCartDB = async (
     path: "orders.units.productId",
     model: Product,
   });
+
   if (!activeCart) {
     const newCart = await Cart.create({ userId, status: "active" });
-    throw new ApiError("Failed to create cart", 500);
+    if (!newCart) throw new ApiError("Failed to create cart", 500);
+    return { success: true, statusCode: 201, cart: newCart };
   }
-  const allUnits = activeCart.orders.reduce<IUnit[]>(
-    (acc, order) => acc.concat([...order.units]),
-    []
-  );
-  const cartWithUnits = {
-    ...activeCart.toObject(),
-    units: allUnits,
-  };
 
   return {
     success: true,
     statusCode: 200,
-    cart: cartWithUnits,
+    cart: activeCart,
   };
 };
 
@@ -73,7 +67,7 @@ export const addProductToCartDB = async (
 ): Promise<any> => {
   const { userId, productId } = params;
 
-  const product = await Product.findById({ _id: productId });
+  const product = await Product.findById(productId);
   if (!product) throw new ApiError("Product not found", 404);
 
   let { cart } = await getUserActiveCartDB({ userId });
@@ -83,44 +77,47 @@ export const addProductToCartDB = async (
     (o: ICartOrder) => o.sellerId.toString() === product.sellerId.toString()
   );
 
-  if (!order) {
-    order = {
+  if (order) {
+    let unit = order.units.find(
+      (u: IUnit) => u.productId.toString() === product._id.toString()
+    );
+
+    if (unit) {
+      unit.quantity++;
+    } else {
+      order.units.push({
+        productId: product._id,
+        quantity: 1,
+        price: product.price,
+        shopName: product.shopName,
+      });
+    }
+  } else {
+    cart.orders.push({
       sellerId: product.sellerId,
       amount: 0,
-      units: [],
-    };
-    cart.orders.push(order);
-  }
-
-  let unit = order.units.find(
-    (u: IUnit) => u.productId.toString() === productId.toString()
-  );
-
-  if (unit) {
-    unit.quantity++;
-    unit.price = product.price;
-  } else {
-    order.units.push({
-      productId: product._id,
-      quantity: 1,
-      price: product.price,
-      shopName: product.shopName,
+      units: [
+        {
+          productId: product._id,
+          quantity: 1,
+          price: product.price,
+          shopName: product.shopName,
+        },
+      ],
     });
   }
 
-  order.amount = order.units.reduce(
-    (sum: number, u: IUnit) => sum + u.price * u.quantity,
-    0
-  );
-
   await cart.save();
 
-  const populatedCart = await getUserPopulatedActiveCartDB({ userId });
+  const { cart: populatedCart } = await getUserPopulatedActiveCartDB({
+    userId,
+  });
+
   return {
     success: true,
     statusCode: 200,
-    cart: populatedCart.cart,
-    message: "quantity updated",
+    cart: populatedCart,
+    message: "Quantity updated",
   };
 };
 
@@ -138,7 +135,7 @@ export const deleteProductFromCartDB = async (
 
   cart.orders.forEach((order: ICartOrder) => {
     order.units.forEach((unit: IUnit) => {
-      if (unit.productId.toString() === productId.toString()) {
+      if (unit.productId.toString() == productId.toString()) {
         productFound = true;
         unit.quantity--;
 
@@ -149,11 +146,6 @@ export const deleteProductFromCartDB = async (
         }
       }
     });
-
-    order.amount = order.units.reduce(
-      (sum, u) => sum + u.price * u.quantity,
-      0
-    );
   });
 
   cart.orders = cart.orders.filter(
@@ -164,14 +156,31 @@ export const deleteProductFromCartDB = async (
 
   await cart.save();
 
-  const populatedCart = await getUserPopulatedActiveCartDB({ userId });
-
+  const { cart: populatedCart } = await getUserPopulatedActiveCartDB({
+    userId,
+  });
   return {
     success: true,
     statusCode: 200,
-    cart: populatedCart.cart,
+    cart: populatedCart,
     message: "quantity updated",
   };
+};
+
+const updateProductStockAndSales = async (
+  productId: Types.ObjectId,
+  quantity: number
+) => {
+  const product = await Product.findById(productId);
+  if (!product) throw new ApiError("Product not found", 404);
+
+  if (product.stock < quantity) {
+    throw new ApiError(`Insufficient stock for product ${product.name}`, 400);
+  }
+
+  product.stock -= quantity;
+  product.sales += quantity;
+  await product.save();
 };
 
 export const cashCheckoutDB = async (params: ICheckoutParams): Promise<any> => {
@@ -179,47 +188,82 @@ export const cashCheckoutDB = async (params: ICheckoutParams): Promise<any> => {
   const cart = await Cart.findOne({ userId, status: "active" });
 
   if (!cart) throw new ApiError("Cart not found", 404);
-  const allUnits = cart.orders.flatMap((order) =>
-    order.units.map((unit) => ({
-      productId: unit.productId,
-      price: unit.price,
-      quantity: unit.quantity,
-      shopName: unit.shopName,
-      sellerId: order.sellerId,
-    }))
-  );
-  const createdOrders = await Promise.all(
-    allUnits.map(async (unit) => {
-      const OrderData: IOrder = {
-        userId: new Types.ObjectId(userId),
-        sellerId: unit.sellerId,
+
+  // Group units by seller
+  const unitsBySeller: Record<string, IUnit[]> = {};
+  cart.orders.forEach((order) => {
+    if (!unitsBySeller[order.sellerId.toString()]) {
+      unitsBySeller[order.sellerId.toString()] = [];
+    }
+    order.units.forEach((unit) => {
+      unitsBySeller[order.sellerId.toString()].push({
         productId: unit.productId,
-        amount: unit.price * unit.quantity,
+        price: unit.price,
         quantity: unit.quantity,
         shopName: unit.shopName,
-        paymentMethod: "cash",
-        paymentStatus: "pending",
-        deliveryStatus: "pending",
-        transactionId: cart.transactionId,
-        cartId: cart._id,
-      };
-      const order = await Order.create(OrderData);
-      return order;
-    })
+      });
+    });
+  });
+
+  // Update stock for all products
+  const allUnits = Object.values(unitsBySeller).flat();
+  await Promise.all(
+    allUnits.map((unit) =>
+      updateProductStockAndSales(unit.productId, unit.quantity)
+    )
   );
 
-  const transactionData: ITransaction = {
-    userId: new Types.ObjectId(userId),
-    orderIds: createdOrders.map((order) => order._id),
-    paymentMethod: "cash",
-    amount: cart.totalAmount,
-    currency: "USD",
-    status: "pending",
-    cartId: cart._id,
-  };
-  const transaction = await Transaction.create(transactionData);
+  // Create orders and transactions per seller
+  const transactions = await Promise.all(
+    Object.entries(unitsBySeller).map(async ([sellerId, units]) => {
+      // Create orders for this seller's products
+      const createdOrders = await Promise.all(
+        units.map(async (unit) => {
+          const OrderData: IOrder = {
+            userId: new Types.ObjectId(userId),
+            sellerId: new Types.ObjectId(sellerId),
+            productId: unit.productId,
+            amount: unit.price * unit.quantity,
+            quantity: unit.quantity,
+            shopName: unit.shopName,
+            paymentMethod: "cash",
+            paymentStatus: "pending",
+            deliveryStatus: "pending",
+            cartId: cart._id,
+          };
+          return await Order.create(OrderData);
+        })
+      );
 
-  cart.transactionId = transaction._id;
+      // Calculate total amount for this seller
+      const sellerAmount = units.reduce(
+        (sum, unit) => sum + unit.price * unit.quantity,
+        0
+      );
+
+      // Create transaction for this seller
+      const transactionData: ITransaction = {
+        clientId: new Types.ObjectId(userId),
+        sellerId: new Types.ObjectId(sellerId),
+        orderIds: createdOrders.map((order) => order._id),
+        paymentMethod: "cash",
+        amount: sellerAmount,
+        currency: "USD",
+        status: "pending",
+        cartId: cart._id,
+      };
+      const transaction = await Transaction.create(transactionData);
+
+      // Update orders with transaction ID
+      await Order.updateMany(
+        { _id: { $in: createdOrders.map((o) => o._id) } },
+        { transactionId: transaction._id }
+      );
+
+      return transaction;
+    })
+  );
+  cart.transactionIds = transactions.map((t) => t._id);
   cart.status = "settled";
   await cart.save();
 
@@ -241,8 +285,51 @@ export const paypalCreateOrderDB = async (
 
   if (!cart) throw new ApiError("Cart not found", 404);
 
-  const totalAmount = cart.totalAmount;
-  const currency = "USD";
+  // Group items by seller
+  const itemsBySeller: Record<string, any[]> = {};
+  cart.orders.forEach((order) => {
+    if (!itemsBySeller[order.sellerId.toString()]) {
+      itemsBySeller[order.sellerId.toString()] = [];
+    }
+    order.units.forEach((unit) => {
+      itemsBySeller[order.sellerId.toString()].push({
+        name: `${unit.shopName} - Product ${unit.productId}`,
+        sku: unit.productId.toString(),
+        unit_amount: {
+          currency_code: "USD",
+          value: unit.price.toString(),
+        },
+        quantity: unit.quantity.toString(),
+      });
+    });
+  });
+
+  // Calculate total amount per seller
+  const purchaseUnits = Object.entries(itemsBySeller).map(
+    ([sellerId, items]) => {
+      const sellerAmount = items.reduce(
+        (sum, item) =>
+          sum + parseFloat(item.unit_amount.value) * parseInt(item.quantity),
+        0
+      );
+
+      return {
+        items,
+        amount: {
+          currency_code: "USD",
+          value: sellerAmount.toFixed(2),
+          breakdown: {
+            item_total: {
+              currency_code: "USD",
+              value: sellerAmount.toFixed(2),
+            },
+          },
+        },
+        custom_id: sellerId, // Store seller ID in custom_id for reference
+      };
+    }
+  );
+
   let accessToken = await redisClient.get("paypalAccessToken");
   if (!accessToken) {
     const data = await generateAccessToken();
@@ -251,17 +338,6 @@ export const paypalCreateOrderDB = async (
     });
     accessToken = data.access_token;
   }
-  const items = cart.orders.flatMap((order) =>
-    order.units.map((unit) => ({
-      name: `${unit.shopName} - Product ${unit.productId}`,
-      sku: unit.productId.toString(),
-      unit_amount: {
-        currency_code: currency,
-        value: unit.price.toString(),
-      },
-      quantity: unit.quantity.toString(),
-    }))
-  );
 
   const response = await axios({
     method: "post",
@@ -272,21 +348,7 @@ export const paypalCreateOrderDB = async (
     },
     data: JSON.stringify({
       intent: "CAPTURE",
-      purchase_units: [
-        {
-          items,
-          amount: {
-            currency_code: currency,
-            value: totalAmount.toString(),
-            breakdown: {
-              item_total: {
-                currency_code: currency,
-                value: totalAmount.toString(),
-              },
-            },
-          },
-        },
-      ],
+      purchase_units: purchaseUnits,
       application_context: {
         brand_name: "ons store",
         locale: "en-US",
@@ -296,21 +358,33 @@ export const paypalCreateOrderDB = async (
     }),
   });
 
-  const transactionData: ITransaction = {
-    userId: new Types.ObjectId(userId),
-    orderIds: [],
-    paymentMethod: "paypal",
-    amount: cart.totalAmount,
-    currency: "USD",
-    status: "failed",
-    cartId: cart._id,
-    paypalOrderId: response.data.id,
-    paymentDetails: response.data,
-  };
-  const transaction = await Transaction.create(transactionData);
+  // Create transactions for each seller
+  const transactions = await Promise.all(
+    Object.entries(itemsBySeller).map(async ([sellerId, items]) => {
+      const sellerAmount = items.reduce(
+        (sum, item) =>
+          sum + parseFloat(item.unit_amount.value) * parseInt(item.quantity),
+        0
+      );
+
+      const transactionData: ITransaction = {
+        clientId: new Types.ObjectId(userId),
+        sellerId: new Types.ObjectId(sellerId),
+        orderIds: [],
+        paymentMethod: "paypal",
+        amount: sellerAmount,
+        currency: "USD",
+        status: "pending",
+        cartId: cart._id,
+        paypalOrderId: response.data.id,
+        paymentDetails: response.data,
+      };
+      return await Transaction.create(transactionData);
+    })
+  );
 
   cart.paypalOrderId = response.data.id;
-  cart.transactionId = transaction._id;
+  cart.transactionIds = transactions.map((t) => t._id);
   await cart.save();
 
   return {
@@ -355,51 +429,83 @@ export const paypalCaptureOrderDB = async (
   if (response.data.status !== "COMPLETED")
     throw new ApiError("PayPal payment not completed", 400);
 
-  const capturedAmount = parseFloat(
-    response.data.purchase_units[0]?.payments?.captures[0]?.amount?.value
-  );
+  // Verify all purchase units were captured successfully
+  const purchaseUnits = response.data.purchase_units;
+  for (const unit of purchaseUnits) {
+    const capturedAmount = parseFloat(
+      unit.payments?.captures[0]?.amount?.value || "0"
+    );
+    const expectedAmount = parseFloat(unit.amount.value);
 
-  if (Math.abs(capturedAmount - cart.totalAmount) > 0.01)
-    throw new ApiError("Payment amount mismatch", 400);
+    if (Math.abs(capturedAmount - expectedAmount) > 0.01) {
+      throw new ApiError(
+        `Payment amount mismatch for seller ${unit.custom_id}`,
+        400
+      );
+    }
+  }
 
-  const allUnits = cart.orders.flatMap((order) =>
-    order.units.map((unit) => ({
-      productId: unit.productId,
-      price: unit.price,
-      quantity: unit.quantity,
-      shopName: unit.shopName,
-      sellerId: order.sellerId,
-    }))
-  );
-
-  const createdOrders = await Promise.all(
-    allUnits.map(async (unit) => {
-      const OrderData: IOrder = {
-        userId: new Types.ObjectId(userId),
-        sellerId: unit.sellerId,
+  // Group units by seller
+  const unitsBySeller: Record<string, IUnit[]> = {};
+  cart.orders.forEach((order) => {
+    if (!unitsBySeller[order.sellerId.toString()]) {
+      unitsBySeller[order.sellerId.toString()] = [];
+    }
+    order.units.forEach((unit) => {
+      unitsBySeller[order.sellerId.toString()].push({
         productId: unit.productId,
-        amount: unit.price * unit.quantity,
+        price: unit.price,
         quantity: unit.quantity,
         shopName: unit.shopName,
-        paymentMethod: "paypal",
-        paymentStatus: "paid",
-        deliveryStatus: "pending",
-        transactionId: cart.transactionId,
-        cartId: cart._id,
-      };
-      const order = await Order.create(OrderData);
-      return order;
-    })
+      });
+    });
+  });
+
+  // Update stock for all products
+  const allUnits = Object.values(unitsBySeller).flat();
+  await Promise.all(
+    allUnits.map((unit) =>
+      updateProductStockAndSales(unit.productId, unit.quantity)
+    )
   );
 
-  const transaction: HydratedDocument<ITransaction> | null =
-    await Transaction.findById(cart.transactionId);
+  // Process orders and transactions per seller
+  await Promise.all(
+    Object.entries(unitsBySeller).map(async ([sellerId, units]) => {
+      // Find the transaction for this seller
+      const transaction = await Transaction.findOne({
+        _id: { $in: cart.transactionIds },
+        sellerId,
+      });
 
-  if (!transaction) throw new ApiError("Transaction not found", 404);
+      if (!transaction)
+        throw new ApiError(`Transaction not found for seller ${sellerId}`, 404);
 
-  transaction.status = "paid";
-  transaction.orderIds = createdOrders.map((order) => order._id);
-  await transaction.save();
+      // Create orders for this seller's products
+      const createdOrders = await Promise.all(
+        units.map(async (unit) => {
+          const OrderData: IOrder = {
+            userId: new Types.ObjectId(userId),
+            sellerId: new Types.ObjectId(sellerId),
+            productId: unit.productId,
+            amount: unit.price * unit.quantity,
+            quantity: unit.quantity,
+            shopName: unit.shopName,
+            paymentMethod: "paypal",
+            paymentStatus: "paid",
+            deliveryStatus: "pending",
+            transactionId: transaction._id,
+            cartId: cart._id,
+          };
+          return await Order.create(OrderData);
+        })
+      );
+
+      transaction.status = "paid";
+      transaction.orderIds = createdOrders.map((order) => order._id);
+      await transaction.save();
+    })
+  );
 
   cart.status = "settled";
   await cart.save();

@@ -1,19 +1,18 @@
-import { getPaginatedOrdersDB } from "../services/orderServices";
+import { getPaginatedTransactionsDB } from "../services/transactionServices";
 import { IGetPaginatedOrdersParams } from "../types/params";
 import { CatchAsyncError } from "../utils/catchAsync";
 import { ExtendRequest } from "../types/custom";
 import { Response } from "express";
 
-export const getPaginatedOrders = CatchAsyncError(
+export const getPaginatedTransactions = CatchAsyncError(
   async (req: ExtendRequest, res: Response) => {
     const {
       _id,
-      userId,
       curPage = 1,
       perPage = 10,
       sort,
     } = req.query as unknown as IGetPaginatedOrdersParams;
-    const excludeFields = ["curPage", "perPage", "sort", "userId"];
+    const excludeFields = ["curPage", "perPage", "sort", "_id"];
     let query = Object.fromEntries(
       Object.entries(req.query).filter(([key]) => !excludeFields.includes(key))
     ) as any;
@@ -22,7 +21,8 @@ export const getPaginatedOrders = CatchAsyncError(
       (match) => `$${match}`
     );
     query = JSON.parse(query);
-    const result = await getPaginatedOrdersDB({
+    console.log("query", query);
+    const result = await getPaginatedTransactionsDB({
       _id,
       curPage: Number(curPage),
       perPage: Number(perPage),
@@ -31,11 +31,10 @@ export const getPaginatedOrders = CatchAsyncError(
     });
     return res.status(result.statusCode).json({
       success: true,
-      orders: result.orders,
+      transactions: result.transactions,
       message: result.message,
       pagesLen: result.pagesLen,
       maxAmount: result.maxAmount,
-      maxQuantity: result.maxQuantity,
     });
   }
 );

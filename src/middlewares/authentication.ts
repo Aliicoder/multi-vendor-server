@@ -30,7 +30,10 @@ export const genRefreshToken = ({ _id, roles }: TokenProps) => {
 export const authentication = CatchAsyncError(
   async (req: ExtendRequest, res: Response, next: NextFunction) => {
     const token = req.get("authorization")?.split(" ")[1];
-    if (!token) throw new ApiError("auth: Token is required", 403);
+    if (!token) {
+      console.log("🛡️ Token not found ~ trying to refresh access token");
+      throw new ApiError("Token is required", 403);
+    }
 
     try {
       const payload = jwt.verify(
@@ -40,7 +43,8 @@ export const authentication = CatchAsyncError(
       req.user = payload;
       next();
     } catch (error) {
-      throw new ApiError("auth: Invalid token", 403);
+      console.log("🛡️ Invalid token ~ trying to refresh access token");
+      throw new ApiError("Invalid token", 403);
     }
   }
 );

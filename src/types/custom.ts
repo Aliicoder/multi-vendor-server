@@ -20,11 +20,20 @@ export interface IAuthState {
   name: string;
   media?: IMedia;
   email?: string;
-  accessToken: string;
+  accessToken?: string;
   addresses?: IAddress[];
   roles: Role[];
+  boarded: boolean;
 }
 
 export interface ExtendRequest extends Request {
   user: TokenProps;
+}
+
+export interface IResult<T> {
+  success: boolean;
+  data?: T[] | T | null;
+  message: string;
+  statusCode: number;
+  [key: string]: any;
 }

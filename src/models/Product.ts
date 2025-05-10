@@ -1,16 +1,21 @@
 import mongoose, { Schema, models, model } from "mongoose";
 import { IMedia, IProduct } from "../types/schema";
 
-const mediaSchema = new Schema<IMedia>({
-  type: { type: String, enum: ["image", "video"], required: true },
-  url: { type: String, required: true },
-  publicId: { type: String, required: true },
-});
+const mediaSchema = new Schema<IMedia>(
+  {
+    type: { type: String, enum: ["image", "video"], required: true },
+    url: { type: String, required: true },
+    publicId: { type: String, required: true },
+  },
+  {
+    _id: false,
+  }
+);
 
 export const productSchema = new Schema<IProduct>(
   {
     name: { type: String, required: true },
-    category: { type: String, required: true },
+    category: { type: [String], required: true },
     sellerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Seller",

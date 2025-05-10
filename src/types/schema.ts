@@ -21,11 +21,12 @@ export interface IUnit {
 
 export interface ICartOrder {
   sellerId: Types.ObjectId;
-  amount: number;
   units: IUnit[];
+  amount?: number;
 }
 
 export interface ICart {
+  _id?: Types.ObjectId;
   userId: Types.ObjectId;
   status: "active" | "settled";
   orders: ICartOrder[];
@@ -33,7 +34,7 @@ export interface ICart {
   totalAmount: number;
   totalQuantity: number;
   paypalOrderId: string;
-  transactionId: Types.ObjectId;
+  transactionIds: Types.ObjectId[];
 }
 
 export interface ICategory {
@@ -75,7 +76,7 @@ export interface IOrder {
 
 export interface IProduct {
   name: string;
-  category: string;
+  category: string[];
   sellerId: Types.ObjectId;
   shopName: string;
   description: string;
@@ -94,7 +95,9 @@ export interface IMedia {
 }
 
 export interface ITransaction {
-  userId: Types.ObjectId;
+  _id?: Types.ObjectId;
+  clientId: Types.ObjectId;
+  sellerId: Types.ObjectId;
   cartId: Types.ObjectId;
   orderIds: Types.ObjectId[];
   paymentMethod: "cash" | "paypal" | "upi";
@@ -104,6 +107,8 @@ export interface ITransaction {
   paymentDetails?: any;
   transactionId?: string;
   paypalOrderId?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 export interface IAddress {
   _id?: Types.ObjectId;
@@ -117,10 +122,12 @@ export interface IAddress {
 export interface IUser {
   _id: Types.ObjectId;
   name: string;
+  businessName: string;
   media: string;
   email: string;
   password: string;
   description: string;
+  boarded: boolean;
   sellerStatus: ISellerStatus;
   paymentStatus: ISellerPayment;
   roles: Role[];
@@ -131,6 +138,8 @@ export interface IUser {
   businessAddresses: IAddress[];
   createdAt?: Date;
   updatedAt?: Date;
+  emailOtp?: string;
+  emailOtpExpiresAt?: Date;
 }
 
 export interface IWishList {

@@ -19,7 +19,7 @@ export const createCategory = CatchAsyncError(
     if (!result.success) throw new ApiError(result.message, result.statusCode);
     res.status(result.statusCode).json({
       success: true,
-      category: result.category,
+      category: result.data,
       message: result.message,
     });
   }
@@ -33,7 +33,7 @@ export const getCategories = CatchAsyncError(
 
     res.status(result.statusCode).json({
       success: true,
-      categories: result.categories,
+      categories: result.data,
       message: result.message,
     });
   }
@@ -66,7 +66,7 @@ export const getPaginatedCategories = CatchAsyncError(
     if (!result.success) throw new ApiError(result.message, result.statusCode);
     res.status(result.statusCode).json({
       success: true,
-      categories: result.categories,
+      categories: result.data,
       message: result.message,
     });
   }

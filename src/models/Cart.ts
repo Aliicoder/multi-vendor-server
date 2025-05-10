@@ -14,11 +14,16 @@ export const UnitSchema = new Schema<IUnit>(
 const OrderSchema = new Schema<ICartOrder>(
   {
     sellerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    amount: { type: Number, required: true },
     units: { type: [UnitSchema], required: true },
   },
-  { _id: false }
+  { _id: false, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
+
+OrderSchema.virtual("amount").get(function (this: ICartOrder) {
+  return this.units.reduce((sum, unit) => {
+    return sum + unit.quantity * unit.price;
+  }, 0);
+});
 
 const CartSchema = new Schema<ICart>(
   {
@@ -26,14 +31,14 @@ const CartSchema = new Schema<ICart>(
     status: { type: String, enum: ["active", "settled"], default: "active" },
     orders: { type: [OrderSchema], required: true },
     paypalOrderId: { type: String },
-    transactionId: { type: Schema.Types.ObjectId, ref: "Transaction" },
+    transactionIds: [{ type: Schema.Types.ObjectId, ref: "Transaction" }],
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
 
 CartSchema.virtual("totalAmount").get(function (this: any) {
   return this.orders.reduce((total: number, order: ICartOrder) => {
-    return total + order.amount;
+    return total + order?.amount!;
   }, 0);
 });
 

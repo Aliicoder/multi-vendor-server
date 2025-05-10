@@ -4,28 +4,31 @@ import { IGetPaginatedOrdersParams } from "../types/params";
 export const getPaginatedOrdersDB = async (
   params: IGetPaginatedOrdersParams
 ): Promise<any> => {
-  const { page, limit, sort, query } = params;
-  const skip = (page - 1) * limit;
-  let orders, count;
-  if (sort) {
-    [orders, count] = await Promise.all([
-      Order.find(query)
-        .sort(sort)
-        .skip(skip)
-        .limit(limit)
-        .populate("productId"),
-      Order.countDocuments(query),
-    ]);
-  } else {
-    [orders, count] = await Promise.all([
-      Order.find(query).skip(skip).limit(limit).populate("productId"),
-      Order.countDocuments(query),
-    ]);
-  }
-  const pagesLen = Math.ceil(count / limit);
+  const { curPage, perPage, sort, query } = params;
+
+  const skip = (curPage - 1) * perPage;
+  const [orders, count, maxAmount, maxQuantity] = await Promise.all([
+    sort
+      ? Order.find(query)
+          .sort(sort)
+          .skip(skip)
+          .limit(perPage)
+          .populate("productId")
+      : Order.find(query).skip(skip).limit(perPage).populate("productId"),
+    Order.countDocuments(query),
+    Order.aggregate([
+      { $group: { _id: null, maxAmount: { $max: "$amount" } } },
+    ]),
+    Order.aggregate([
+      { $group: { _id: null, maxQuantity: { $max: "$quantity" } } },
+    ]),
+  ]);
+  const pagesLen = Math.ceil(count / perPage);
   return {
     success: true,
     orders,
+    maxAmount: maxAmount[0].maxAmount,
+    maxQuantity: maxQuantity[0].maxQuantity,
     pagesLen,
     message: "Orders fetched successfully",
     statusCode: 200,

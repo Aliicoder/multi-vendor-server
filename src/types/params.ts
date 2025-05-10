@@ -1,11 +1,12 @@
 import { UploadedFile } from "express-fileupload";
-import { Types } from "mongoose";
 import { ISellerStatus, Role } from "./schema";
+import { Types } from "mongoose";
 
 export interface IFetchProductsParams {
   perPage: number;
   curPage: number;
   sort: string;
+  name?: string;
   query: {};
   category?: string;
 }
@@ -30,10 +31,10 @@ export interface IUpdateProductParams {
   brand: string;
   stock: number;
   price: number;
-  discount?: number;
+  discount: number;
   category: string;
-  deletedMedia?: string[];
-  media: UploadedFile[];
+  deletedMedia: (string | undefined)[];
+  media: (UploadedFile | undefined)[];
 }
 
 export interface ICreateCategoryParams {
@@ -65,6 +66,9 @@ export interface IGetSearchedProductsParams {
 }
 export interface IGetAISearchedProductsParams {
   prompt: string;
+  curPage: number;
+  perPage: number;
+  outOfStock: boolean;
 }
 
 export interface IGetActiveCartParams {
@@ -111,8 +115,10 @@ export interface ICheckoutParams {
 }
 
 export interface IGetPaginatedOrdersParams {
-  page: number;
-  limit: number;
+  _id?: string;
+  userId?: string;
+  curPage: number;
+  perPage: number;
   sort: string;
   query: any;
 }
@@ -140,4 +146,21 @@ export interface IPaypalCaptureOrderParams {
 }
 export interface IPaypalCreateOrderParams {
   userId: string;
+}
+export interface ISetDefaultAddressParams {
+  userId: string;
+  addressId: string;
+}
+
+export interface ISignupParams {
+  email: string;
+  name: string;
+  password: string;
+  requestedRole: Role;
+}
+
+export interface IOnboardingParams {
+  userId: string;
+  businessName: string;
+  description: string;
 }

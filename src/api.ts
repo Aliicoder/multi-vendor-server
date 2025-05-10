@@ -10,6 +10,7 @@ import ordersRouter from "./routes/ordersRouter";
 import { setupSecurity } from "./middlewares/security";
 import { setupCommonMiddleware } from "./middlewares/common";
 import { Application } from "express-serve-static-core";
+import transactionsRouter from "./routes/TransactionRouter";
 
 const app: Application = express();
 
@@ -23,6 +24,8 @@ app.use("/api/v1/carts", cartsRouter);
 app.use("/api/v1/wishLists", wishListRouter);
 app.use("/api/v1/currencies", currenciesRouter);
 app.use("/api/v1/orders", ordersRouter);
+app.use("/api/v1/transactions", transactionsRouter);
+
 app.use("*", (req, res) => {
   res.status(404).json({ message: "undefined route" });
 });

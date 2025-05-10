@@ -13,7 +13,6 @@ export const redisClient = createClient({
 
 const cacheAllProductNames = async () => {
   try {
-    if (await redisClient.get("cached_product_names")) return;
     const products = await Product.find();
     const productNames = products.map((product) => product.name);
     await redisClient.set("cached_product_names", JSON.stringify(productNames));

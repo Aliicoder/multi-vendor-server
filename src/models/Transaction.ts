@@ -3,7 +3,8 @@ import { ITransaction } from "../types/schema";
 
 const TransactionSchema = new Schema<ITransaction>(
   {
-    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    clientId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    sellerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     orderIds: [{ type: Schema.Types.ObjectId, ref: "Order", required: true }],
     paymentMethod: {
       type: String,

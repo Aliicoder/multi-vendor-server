@@ -7,23 +7,34 @@ import {
   googleLogin,
   login,
   logout,
+  onboarding,
   refreshAccessToken,
   rejectApplicant,
+  sendEmailOtp,
+  sendMobileOtp,
   setDefaultAddress,
-  signup,
   updateAddress,
+  verifyEmailOtp,
+  verifyMobileOtp,
 } from "../controllers/userControllers";
 import { authentication } from "../middlewares/authentication";
 
 const usersRouter = Router();
 
-usersRouter.post("/signup", signup);
 usersRouter.post("/login", login);
 usersRouter.get("/refresh", refreshAccessToken);
 usersRouter.patch("/logout", logout);
 usersRouter.post("/google-login", googleLogin);
 
 usersRouter.get("/paginated", authentication, getPaginatedUsers);
+
+usersRouter.post("/send-mobile-otp", sendMobileOtp);
+usersRouter.post("/verify-mobile-otp", verifyMobileOtp);
+
+usersRouter.post("/send-email-otp", sendEmailOtp);
+usersRouter.post("/verify-email-otp", verifyEmailOtp);
+
+usersRouter.post("/:userId/onboarding", authentication, onboarding);
 
 usersRouter.patch("/:userId/accept", authentication, acceptApplicant);
 usersRouter.patch("/:userId/reject", authentication, rejectApplicant);
